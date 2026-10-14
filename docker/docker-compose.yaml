@@ -1,0 +1,85 @@
+name: spartans
+
+# Spartans Wallet Provider. Se une a la red del issuer (uis-issuer_default) para reutilizar el
+# servicio status-list y quedar detras del mismo haproxy (civica-desarrollo.avance.org.co).
+# Requisito previo: ./scripts/generar-pki-spartans.sh  (crea docker/spartans/keystore.jks)
+
+networks:
+  default:
+    driver: bridge
+  edge:
+    name: uis-issuer_default
+    external: true
+
+services:
+  postgres-spartans:
+    image: postgres:18.4-alpine3.24
+    container_name: postgres-spartans
+    ports:
+      - "5436:5432"
+    environment:
+      - POSTGRES_DB=spartans
+      - POSTGRES_USER=spartans
+      - POSTGRES_PASSWORD=spartans
+    volumes:
+      - ../schemas/postgresql/V1.sql:/docker-entrypoint-initdb.d/01-V1.sql:RO
+      - postgres-spartans:/var/lib/postgresql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U spartans -d spartans" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - default
+
+  spartans-wallet-provider:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: spartans-wallet-provider:local
+    container_name: spartans-wallet-provider
+    depends_on:
+      postgres-spartans:
+        condition: service_healthy
+    volumes:
+      - ./spartans/keystore.jks:/keystore.jks:ro
+    environment:
+      - SERVER_PORT=8080
+      # Base de datos
+      - DATABASE_URL=r2dbc:pool:postgresql://postgres-spartans:5432/spartans
+      - DATABASE_USERNAME=spartans
+      - DATABASE_PASSWORD=spartans
+      # Llave de firma de las attestations
+      - SIGNINGKEY_KEYSTOREFILE=/keystore.jks
+      - SIGNINGKEY_KEYSTOREPASSWORD=spartans-keys
+      - SIGNINGKEY_KEYSTORETYPE=JKS
+      - SIGNINGKEY_KEYALIAS=spartans-wallet-provider
+      - SIGNINGKEY_KEYPASSWORD=spartans-signing
+      - SIGNINGKEY_ALGORITHM=ES256
+      # Identidad del Wallet Provider
+      - ISSUER_PUBLICURL=https://civica-desarrollo.avance.org.co/spartans
+      - ISSUER_NAME=Spartans Wallet Provider
+      - CLIENTID=eudiw-abca
+      # Wallet Instance Attestation
+      - WALLETINSTANCEATTESTATION_WALLETNAME=Spartans Wallet
+      - WALLETINSTANCEATTESTATION_WALLETLINK=https://civica-desarrollo.avance.org.co
+      - WALLETINSTANCEATTESTATION_WALLETVERSION=1.0.0
+      - WALLETINSTANCEATTESTATION_WALLETSOLUTIONCERTIFICATIONINFORMATION=https://civica-desarrollo.avance.org.co/spartans/certification
+      # Key Attestation
+      - KEYATTESTATION_CERTIFICATION=https://civica-desarrollo.avance.org.co/spartans/certification
+      # Status list (servicio compartido con el issuer)
+      - TOKENSTATUSLISTSERVICE_SERVICEURL=http://status-list:5000/token_status_list/take
+      - TOKENSTATUSLISTSERVICE_APIKEY=aaa-bbb-ccc
+      - TOKENSTATUSLISTSERVICE_COUNTRY=FC
+      # Wallet flavor dev, build debug (firmado con ~/.android/debug.keystore)
+      - PLATFORMKEYATTESTATIONVALIDATION_ANDROID_APPLICATIONS_0_PACKAGENAME=co.org.avance.wallet.dev
+      - PLATFORMKEYATTESTATIONVALIDATION_ANDROID_APPLICATIONS_0_SIGNINGCERTIFICATEDIGESTS_0=xUMzSllGJMaZkE7gIcekICf1Rs6jjvcvM9wzmiQwmbk=
+      # Solo desarrollo: aceptar emuladores / bootloader desbloqueado
+      - PLATFORMKEYATTESTATIONVALIDATION_ANDROID_SOFTWAREATTESTATIONENABLED=true
+      - PLATFORMKEYATTESTATIONVALIDATION_ANDROID_UNLOCKEDBOOTLOADERALLOWED=true
+    networks:
+      - default
+      - edge
+
+volumes:
+  postgres-spartans:
