@@ -1,0 +1,7 @@
+# Spartans Wallet Provider — punto de entrada para lanzar el stack manualmente.
+# Solo INCLUYE el compose original (no lo modifica) y conserva su nombre de proyecto ('spartans'), para seguir
+# usando los mismos contenedores y volúmenes.
+name: spartans
+
+include:
+  - path: ../docker/docker-compose.yaml
